@@ -16,7 +16,7 @@
 2. [FFmpeg](https://ffmpeg.org/) (用于视频处理)
 3. [ImageMagick](https://imagemagick.org/) (用于 PDF 合成)
 
-> **提示**：如果你安装了 `Scoop`，建议通过 `Scoop` 安装：
+> **提示**：如果你安装了 `scoop`，建议通过 `scoop` 安装：
 > `scoop install uv ffmpeg imagemagick`
 
 ## 🚀 快速开始
