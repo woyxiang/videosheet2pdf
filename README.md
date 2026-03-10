@@ -12,7 +12,7 @@
 ## 🛠️ 环境要求
 
 你需要安装以下工具：
-1. [uv](https://github.com/astral-sh/uv) (强大的 Python 包管理工具)
+1. [uv](https://github.com/astral-sh/uv) ( Python 包管理工具)
 2. [FFmpeg](https://ffmpeg.org/) (用于视频处理)
 3. [ImageMagick](https://imagemagick.org/) (用于 PDF 合成)
 
