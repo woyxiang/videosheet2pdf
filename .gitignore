@@ -1,2 +1,4 @@
 *.pdf
 *.mp4
+temp_frames/
+__pycache__/

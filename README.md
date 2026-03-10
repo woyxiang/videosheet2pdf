@@ -21,10 +21,10 @@
 
 ## 🚀 快速开始
 
-将脚本保存为 `sheet2pdf.py`，然后在终端执行：
+将脚本保存为 `videosheet2pdf.py`，然后在终端执行：
 
 ```bash
-uv run sheet2pdf.py "你的乐谱视频.mp4"
+uv run videosheet2pdf.py "你的乐谱视频.mp4"
 ```
 
 ## Credits

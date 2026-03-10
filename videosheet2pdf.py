@@ -10,7 +10,7 @@ import glob
 import subprocess
 import cv2 as cv
 
-# ================= 配置区 (原 config.py) =================
+# ================= 配置区 =================
 CONFIG = {
     "TEMP_DIR": "temp_frames",
     "SAMPLE_FRAME_INDEX": 50,
@@ -22,7 +22,7 @@ CONFIG = {
     "COMPRESS_METHOD": "Group4",
 }
 
-# ================= 逻辑区 (原 processor.py) =================
+# ================= 逻辑区  =================
 
 def get_crop_params(video_path):
     """计算 crop 参数，增加边缘内缩和偶数对齐"""
@@ -97,7 +97,7 @@ def build_pdf(output_pdf):
     print(f"[*] 执行命令: {cmd_str}")
     subprocess.run(cmd_str, shell=True)
 
-# ================= 入口区 (原 main.py) =================
+# ================= 入口区  =================
 
 def main():
     if len(sys.argv) < 2:
