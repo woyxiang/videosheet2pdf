@@ -21,19 +21,24 @@ DEFAULT_CONFIG = {
     "TILE_LAYOUT": "1x5",
     "DENSITY": "300",
     "COMPRESS_METHOD": "Group4",
+    "ENABLE_CROP": True,  # 默认启用
 }
 
 # ================= 逻辑区  =================
 
 def get_crop_params(video_path, config):
     """计算 crop 参数，增加边缘内缩和偶数对齐"""
+    if not config["ENABLE_CROP"]:
+        return None
+
     vid = cv.VideoCapture(video_path)
     vid.set(cv.CAP_PROP_POS_FRAMES, config["SAMPLE_FRAME_INDEX"])
     ret, frame = vid.read()
     vid.release()
 
     if not ret:
-        raise ValueError("无法读取视频帧。")
+        print("[!] 警告：无法读取视频帧，将跳过裁剪。")
+        return None
 
     gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
     gray = cv.medianBlur(gray, 3)
@@ -42,7 +47,7 @@ def get_crop_params(video_path, config):
     contours, _ = cv.findContours(thresh, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
 
     if not contours:
-        return "0:0:0:0"
+        return None
 
     contours = sorted(contours, key=cv.contourArea, reverse=True)
     h_img, w_img = frame.shape[:2]
@@ -66,7 +71,15 @@ def extract_frames(video_path, crop_params, config):
         os.remove(f)
 
     output_pattern = os.path.join(config["TEMP_DIR"], "frame_%03d.png")
-    vf_param = f"crop={crop_params},select='not(n)+gt(scene,{config['SCENE_THRESHOLD']})',setpts=N/FRAME_RATE/TB"
+    
+    # 根据是否有 crop_params 构建滤镜链
+    filters = []
+    if crop_params:
+        filters.append(f"crop={crop_params}")
+    filters.append(f"select='not(n)+gt(scene,{config['SCENE_THRESHOLD']})'")
+    filters.append("setpts=N/FRAME_RATE/TB")
+    
+    vf_param = ",".join(filters)
     
     cmd = [
         "ffmpeg", "-loglevel", "warning", "-hide_banner", 
@@ -100,21 +113,23 @@ def build_pdf(output_pdf, config):
 def main():
     parser = argparse.ArgumentParser(description="视频乐谱转 PDF 工具")
     
-    # 必填参数
     parser.add_argument("video", help="输入视频文件路径")
-    parser.add_argument("-o", "--output", help="输出 PDF 路径 (默认同名)")
+    parser.add_argument("-o", "--output", help="输出 PDF 路径")
 
-    # 可选参数覆盖 (对应 CONFIG)
-    parser.add_argument("--thresh", type=int, default=DEFAULT_CONFIG["THRESH_VALUE"], help="二值化阈值 (默认: 240)")
-    parser.add_argument("--scene", type=float, default=DEFAULT_CONFIG["SCENE_THRESHOLD"], help="场景变动阈值 (默认: 0.01)")
-    parser.add_argument("--tile", default=DEFAULT_CONFIG["TILE_LAYOUT"], help="PDF 布局, 如 1x5 (默认: 1x5)")
-    parser.add_argument("--index", type=int, default=DEFAULT_CONFIG["SAMPLE_FRAME_INDEX"], help="采样帧索引 (默认: 50)")
-    parser.add_argument("--density", default=DEFAULT_CONFIG["DENSITY"], help="PDF 像素密度 (默认: 300)")
+    # Crop 开关：默认 True，传入 --no-crop 则变为 False
+    parser.add_argument("--no-crop", action="store_false", dest="enable_crop", help="禁用自动裁剪功能")
+    
+    parser.add_argument("--thresh", type=int, default=DEFAULT_CONFIG["THRESH_VALUE"], help="二值化阈值")
+    parser.add_argument("--scene", type=float, default=DEFAULT_CONFIG["SCENE_THRESHOLD"], help="场景变动阈值")
+    parser.add_argument("--tile", default=DEFAULT_CONFIG["TILE_LAYOUT"], help="PDF 布局 (如 1x5)")
+    parser.add_argument("--index", type=int, default=DEFAULT_CONFIG["SAMPLE_FRAME_INDEX"], help="采样帧索引")
+    parser.add_argument("--density", default=DEFAULT_CONFIG["DENSITY"], help="PDF 像素密度")
 
     args = parser.parse_args()
 
-    # 组装运行时配置
+    # 运行时配置
     config = DEFAULT_CONFIG.copy()
+    config["ENABLE_CROP"] = args.enable_crop
     config["THRESH_VALUE"] = args.thresh
     config["SCENE_THRESHOLD"] = args.scene
     config["TILE_LAYOUT"] = args.tile
@@ -131,8 +146,10 @@ def main():
     print("=== 视频乐谱转 PDF 工作流启动 ===")
     try:
         crop_params = get_crop_params(video_file, config)
-        print(f"[*] 使用配置: {config}")
-        print(f"[*] 自动计算 Crop 参数: {crop_params}")
+        if crop_params:
+            print(f"[*] 自动计算 Crop 参数: {crop_params}")
+        else:
+            print("[*] 未启用裁剪或未检测到有效区域，使用全画幅。")
         
         extract_frames(video_file, crop_params, config)
         build_pdf(output_pdf, config)
