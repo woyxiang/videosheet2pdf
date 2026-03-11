@@ -8,10 +8,11 @@ import os
 import sys
 import glob
 import subprocess
+import argparse
 import cv2 as cv
 
-# ================= 配置区 =================
-CONFIG = {
+# ================= 默认配置 =================
+DEFAULT_CONFIG = {
     "TEMP_DIR": "temp_frames",
     "SAMPLE_FRAME_INDEX": 50,
     "THRESH_VALUE": 240,
@@ -24,10 +25,10 @@ CONFIG = {
 
 # ================= 逻辑区  =================
 
-def get_crop_params(video_path):
+def get_crop_params(video_path, config):
     """计算 crop 参数，增加边缘内缩和偶数对齐"""
     vid = cv.VideoCapture(video_path)
-    vid.set(cv.CAP_PROP_POS_FRAMES, CONFIG["SAMPLE_FRAME_INDEX"])
+    vid.set(cv.CAP_PROP_POS_FRAMES, config["SAMPLE_FRAME_INDEX"])
     ret, frame = vid.read()
     vid.release()
 
@@ -37,7 +38,7 @@ def get_crop_params(video_path):
     gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
     gray = cv.medianBlur(gray, 3)
     
-    thresh = cv.threshold(gray, CONFIG["THRESH_VALUE"], CONFIG["THRESH_MAX"], cv.THRESH_BINARY)[1]
+    thresh = cv.threshold(gray, config["THRESH_VALUE"], config["THRESH_MAX"], cv.THRESH_BINARY)[1]
     contours, _ = cv.findContours(thresh, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
 
     if not contours:
@@ -50,25 +51,23 @@ def get_crop_params(video_path):
     if w == w_img and h == h_img and len(contours) > 1:
         x, y, w, h = cv.boundingRect(contours[1])
 
-    # 内缩与对齐
     padding = 1 
     x, y, w, h = x + padding, y + padding, w - (padding * 2), h - (padding * 2)
     w, h, x, y = w & ~1, h & ~1, x & ~1, y & ~1
 
     return f"{w}:{h}:{x}:{y}"
 
-def extract_frames(video_path, crop_params):
+def extract_frames(video_path, crop_params, config):
     """FFmpeg 场景检测抽帧"""
-    if not os.path.exists(CONFIG["TEMP_DIR"]):
-        os.makedirs(CONFIG["TEMP_DIR"])
+    if not os.path.exists(config["TEMP_DIR"]):
+        os.makedirs(config["TEMP_DIR"])
     
-    for f in glob.glob(os.path.join(CONFIG["TEMP_DIR"], "*.png")):
+    for f in glob.glob(os.path.join(config["TEMP_DIR"], "*.png")):
         os.remove(f)
 
-    output_pattern = os.path.join(CONFIG["TEMP_DIR"], "frame_%03d.png")
-    vf_param = f"crop={crop_params},select='not(n)+gt(scene,{CONFIG['SCENE_THRESHOLD']})',setpts=N/FRAME_RATE/TB"
+    output_pattern = os.path.join(config["TEMP_DIR"], "frame_%03d.png")
+    vf_param = f"crop={crop_params},select='not(n)+gt(scene,{config['SCENE_THRESHOLD']})',setpts=N/FRAME_RATE/TB"
     
-    # 使用列表传参，并对关键路径加引号
     cmd = [
         "ffmpeg", "-loglevel", "warning", "-hide_banner", 
         "-i", video_path,
@@ -79,17 +78,16 @@ def extract_frames(video_path, crop_params):
     print(f"[*] 执行命令: {' '.join(cmd)}")
     subprocess.run(cmd)
 
-def build_pdf(output_pdf):
+def build_pdf(output_pdf, config):
     """Magick 合成 PDF"""
-    input_pattern = os.path.join(CONFIG["TEMP_DIR"], "*.png")
+    input_pattern = os.path.join(config["TEMP_DIR"], "*.png")
     
-    # 针对 Windows shell 处理引号
     cmd = [
         "magick", "montage", f'"{input_pattern}"',
-        "-tile", CONFIG["TILE_LAYOUT"],
+        "-tile", config["TILE_LAYOUT"],
         "-geometry", "+0+0",
-        "-compress", CONFIG["COMPRESS_METHOD"],
-        "-density", CONFIG["DENSITY"],
+        "-compress", config["COMPRESS_METHOD"],
+        "-density", config["DENSITY"],
         f'"{output_pdf}"'
     ]
     
@@ -100,12 +98,31 @@ def build_pdf(output_pdf):
 # ================= 入口区  =================
 
 def main():
-    if len(sys.argv) < 2:
-        print("用法: uv run sheet2pdf.py <输入视频路径> [输出PDF路径]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="视频乐谱转 PDF 工具")
+    
+    # 必填参数
+    parser.add_argument("video", help="输入视频文件路径")
+    parser.add_argument("-o", "--output", help="输出 PDF 路径 (默认同名)")
 
-    video_file = sys.argv[1]
-    output_pdf = sys.argv[2] if len(sys.argv) > 2 else f"{os.path.splitext(video_file)[0]}.pdf"
+    # 可选参数覆盖 (对应 CONFIG)
+    parser.add_argument("--thresh", type=int, default=DEFAULT_CONFIG["THRESH_VALUE"], help="二值化阈值 (默认: 240)")
+    parser.add_argument("--scene", type=float, default=DEFAULT_CONFIG["SCENE_THRESHOLD"], help="场景变动阈值 (默认: 0.01)")
+    parser.add_argument("--tile", default=DEFAULT_CONFIG["TILE_LAYOUT"], help="PDF 布局, 如 1x5 (默认: 1x5)")
+    parser.add_argument("--index", type=int, default=DEFAULT_CONFIG["SAMPLE_FRAME_INDEX"], help="采样帧索引 (默认: 50)")
+    parser.add_argument("--density", default=DEFAULT_CONFIG["DENSITY"], help="PDF 像素密度 (默认: 300)")
+
+    args = parser.parse_args()
+
+    # 组装运行时配置
+    config = DEFAULT_CONFIG.copy()
+    config["THRESH_VALUE"] = args.thresh
+    config["SCENE_THRESHOLD"] = args.scene
+    config["TILE_LAYOUT"] = args.tile
+    config["SAMPLE_FRAME_INDEX"] = args.index
+    config["DENSITY"] = args.density
+
+    video_file = args.video
+    output_pdf = args.output if args.output else f"{os.path.splitext(video_file)[0]}.pdf"
 
     if not os.path.exists(video_file):
         print(f"错误: 找不到文件 '{video_file}'")
@@ -113,11 +130,12 @@ def main():
 
     print("=== 视频乐谱转 PDF 工作流启动 ===")
     try:
-        crop_params = get_crop_params(video_file)
+        crop_params = get_crop_params(video_file, config)
+        print(f"[*] 使用配置: {config}")
         print(f"[*] 自动计算 Crop 参数: {crop_params}")
         
-        extract_frames(video_file, crop_params)
-        build_pdf(output_pdf)
+        extract_frames(video_file, crop_params, config)
+        build_pdf(output_pdf, config)
         
         print(f"=== 成功！PDF 已生成: {output_pdf} ===")
     except Exception as e:
