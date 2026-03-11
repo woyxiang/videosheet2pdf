@@ -23,7 +23,7 @@ DEFAULT_CONFIG = {
     "DENSITY": "300",
     "COMPRESS_METHOD": "Group4",
     "ENABLE_CROP": True,
-    "KEEP_TEMP": False,  # 默认不保留临时文件
+    "KEEP_TEMP": False,
 }
 
 # ================= 逻辑区  =================
@@ -34,12 +34,23 @@ def get_crop_params(video_path, config):
         return None
 
     vid = cv.VideoCapture(video_path)
+    
+    # 如果指定了起始时间 -ss，OpenCV 尝试跳转到对应位置采样（单位：秒或帧）
+    # 这里简单处理：如果 ss 是秒数，跳转到对应毫秒；如果是索引，则按原样
+    if config["START_TIME"]:
+        try:
+            # 尝试处理简单的秒数，如果是 HH:MM:SS 格式则跳过
+            ss_float = float(config["START_TIME"])
+            vid.set(cv.CAP_PROP_POS_MSEC, ss_float * 1000)
+        except ValueError:
+            pass 
+
     vid.set(cv.CAP_PROP_POS_FRAMES, config["SAMPLE_FRAME_INDEX"])
     ret, frame = vid.read()
     vid.release()
 
     if not ret:
-        print("[!] 警告：无法读取视频帧，将跳过裁剪。")
+        print("[!] 警告：无法读取采样帧，将跳过裁剪。")
         return None
 
     gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
@@ -69,7 +80,6 @@ def extract_frames(video_path, crop_params, config):
     if not os.path.exists(config["TEMP_DIR"]):
         os.makedirs(config["TEMP_DIR"])
     else:
-        # 清理旧的残余文件
         for f in glob.glob(os.path.join(config["TEMP_DIR"], "*.png")):
             os.remove(f)
 
@@ -83,13 +93,24 @@ def extract_frames(video_path, crop_params, config):
     
     vf_param = ",".join(filters)
     
-    cmd = [
-        "ffmpeg", "-loglevel", "warning", "-hide_banner", 
+    # 构建 FFmpeg 命令
+    cmd = ["ffmpeg", "-loglevel", "warning", "-hide_banner"]
+    
+    # 增加 -ss (放在 -i 之前以实现快速定位)
+    if config["START_TIME"]:
+        cmd.extend(["-ss", config["START_TIME"]])
+    
+    # 增加 -to
+    if config["END_TIME"]:
+        cmd.extend(["-to", config["END_TIME"]])
+        
+    cmd.extend([
         "-i", video_path,
         "-vf", vf_param,
         "-fps_mode", "vfr", 
         output_pattern, "-y"
-    ]
+    ])
+    
     print(f"[*] 执行命令: {' '.join(cmd)}")
     subprocess.run(cmd)
 
@@ -118,27 +139,31 @@ def main():
     parser.add_argument("video", help="输入视频文件路径")
     parser.add_argument("-o", "--output", help="输出 PDF 路径")
 
-    # 参数开关
+    # FFmpeg 剪切参数
+    parser.add_argument("-ss", dest="start_time", help="开始时间 (例如: 00:00:10 或 10)")
+    parser.add_argument("-to", dest="end_time", help="结束时间 (例如: 00:01:30 或 90)")
+
+    # 开关参数
     parser.add_argument("--no-crop", action="store_false", dest="enable_crop", help="禁用自动裁剪")
-    parser.add_argument("--keep", action="store_true", dest="keep_temp", help="保留临时生成的图片文件")
+    parser.add_argument("--keep", action="store_true", dest="keep_temp", help="保留临时文件")
     
-    # 调节参数
+    # 其他配置
     parser.add_argument("--thresh", type=int, default=DEFAULT_CONFIG["THRESH_VALUE"], help="二值化阈值")
     parser.add_argument("--scene", type=float, default=DEFAULT_CONFIG["SCENE_THRESHOLD"], help="场景变动阈值")
     parser.add_argument("--tile", default=DEFAULT_CONFIG["TILE_LAYOUT"], help="PDF 布局 (如 1x5)")
-    parser.add_argument("--index", type=int, default=DEFAULT_CONFIG["SAMPLE_FRAME_INDEX"], help="采样帧索引")
     parser.add_argument("--density", default=DEFAULT_CONFIG["DENSITY"], help="PDF 像素密度")
 
     args = parser.parse_args()
 
     config = DEFAULT_CONFIG.copy()
     config.update({
+        "START_TIME": args.start_time,
+        "END_TIME": args.end_time,
         "ENABLE_CROP": args.enable_crop,
         "KEEP_TEMP": args.keep_temp,
         "THRESH_VALUE": args.thresh,
         "SCENE_THRESHOLD": args.scene,
         "TILE_LAYOUT": args.tile,
-        "SAMPLE_FRAME_INDEX": args.index,
         "DENSITY": args.density
     })
 
@@ -151,6 +176,7 @@ def main():
 
     print("=== 视频乐谱转 PDF 工作流启动 ===")
     try:
+        # 获取 Crop 参数（内部会参考 START_TIME）
         crop_params = get_crop_params(video_file, config)
         if crop_params:
             print(f"[*] 自动计算 Crop 参数: {crop_params}")
@@ -158,9 +184,8 @@ def main():
         extract_frames(video_file, crop_params, config)
         build_pdf(output_pdf, config)
         
-        # 自动删除临时文件夹
         if not config["KEEP_TEMP"]:
-            print(f"[*] 正在清理临时文件: {config['TEMP_DIR']}")
+            print(f"[*] 正在清理临时文件...")
             shutil.rmtree(config["TEMP_DIR"], ignore_errors=True)
         
         print(f"=== 成功！PDF 已生成: {output_pdf} ===")
