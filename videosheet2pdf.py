@@ -21,7 +21,7 @@ DEFAULT_CONFIG = {
     "SCENE_THRESHOLD": 0.01,
     "TILE_LAYOUT": "1x5",
     "DENSITY": "300",
-    "COMPRESS_METHOD": "Group4",
+    "COMPRESS_METHOD": "jpeg",
     "ENABLE_CROP": True,
     "KEEP_TEMP": False,
 }
