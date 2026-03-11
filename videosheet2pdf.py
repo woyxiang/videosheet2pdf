@@ -7,6 +7,7 @@
 import os
 import sys
 import glob
+import shutil
 import subprocess
 import argparse
 import cv2 as cv
@@ -21,7 +22,8 @@ DEFAULT_CONFIG = {
     "TILE_LAYOUT": "1x5",
     "DENSITY": "300",
     "COMPRESS_METHOD": "Group4",
-    "ENABLE_CROP": True,  # 默认启用
+    "ENABLE_CROP": True,
+    "KEEP_TEMP": False,  # 默认不保留临时文件
 }
 
 # ================= 逻辑区  =================
@@ -66,13 +68,13 @@ def extract_frames(video_path, crop_params, config):
     """FFmpeg 场景检测抽帧"""
     if not os.path.exists(config["TEMP_DIR"]):
         os.makedirs(config["TEMP_DIR"])
-    
-    for f in glob.glob(os.path.join(config["TEMP_DIR"], "*.png")):
-        os.remove(f)
+    else:
+        # 清理旧的残余文件
+        for f in glob.glob(os.path.join(config["TEMP_DIR"], "*.png")):
+            os.remove(f)
 
     output_pattern = os.path.join(config["TEMP_DIR"], "frame_%03d.png")
     
-    # 根据是否有 crop_params 构建滤镜链
     filters = []
     if crop_params:
         filters.append(f"crop={crop_params}")
@@ -116,9 +118,11 @@ def main():
     parser.add_argument("video", help="输入视频文件路径")
     parser.add_argument("-o", "--output", help="输出 PDF 路径")
 
-    # Crop 开关：默认 True，传入 --no-crop 则变为 False
-    parser.add_argument("--no-crop", action="store_false", dest="enable_crop", help="禁用自动裁剪功能")
+    # 参数开关
+    parser.add_argument("--no-crop", action="store_false", dest="enable_crop", help="禁用自动裁剪")
+    parser.add_argument("--keep", action="store_true", dest="keep_temp", help="保留临时生成的图片文件")
     
+    # 调节参数
     parser.add_argument("--thresh", type=int, default=DEFAULT_CONFIG["THRESH_VALUE"], help="二值化阈值")
     parser.add_argument("--scene", type=float, default=DEFAULT_CONFIG["SCENE_THRESHOLD"], help="场景变动阈值")
     parser.add_argument("--tile", default=DEFAULT_CONFIG["TILE_LAYOUT"], help="PDF 布局 (如 1x5)")
@@ -127,14 +131,16 @@ def main():
 
     args = parser.parse_args()
 
-    # 运行时配置
     config = DEFAULT_CONFIG.copy()
-    config["ENABLE_CROP"] = args.enable_crop
-    config["THRESH_VALUE"] = args.thresh
-    config["SCENE_THRESHOLD"] = args.scene
-    config["TILE_LAYOUT"] = args.tile
-    config["SAMPLE_FRAME_INDEX"] = args.index
-    config["DENSITY"] = args.density
+    config.update({
+        "ENABLE_CROP": args.enable_crop,
+        "KEEP_TEMP": args.keep_temp,
+        "THRESH_VALUE": args.thresh,
+        "SCENE_THRESHOLD": args.scene,
+        "TILE_LAYOUT": args.tile,
+        "SAMPLE_FRAME_INDEX": args.index,
+        "DENSITY": args.density
+    })
 
     video_file = args.video
     output_pdf = args.output if args.output else f"{os.path.splitext(video_file)[0]}.pdf"
@@ -148,11 +154,14 @@ def main():
         crop_params = get_crop_params(video_file, config)
         if crop_params:
             print(f"[*] 自动计算 Crop 参数: {crop_params}")
-        else:
-            print("[*] 未启用裁剪或未检测到有效区域，使用全画幅。")
         
         extract_frames(video_file, crop_params, config)
         build_pdf(output_pdf, config)
+        
+        # 自动删除临时文件夹
+        if not config["KEEP_TEMP"]:
+            print(f"[*] 正在清理临时文件: {config['TEMP_DIR']}")
+            shutil.rmtree(config["TEMP_DIR"], ignore_errors=True)
         
         print(f"=== 成功！PDF 已生成: {output_pdf} ===")
     except Exception as e:
