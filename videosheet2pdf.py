@@ -49,8 +49,9 @@ def get_crop_params(video_path, config):
             vid.set(cv.CAP_PROP_POS_MSEC, ss_float * 1000)
         except ValueError:
             pass 
-
-    vid.set(cv.CAP_PROP_POS_FRAMES, config["SAMPLE_FRAME_INDEX"])
+    
+    if not config["START_TIME"]:
+        vid.set(cv.CAP_PROP_POS_FRAMES, config["SAMPLE_FRAME_INDEX"])
     ret, frame = vid.read()
     vid.release()
 
